@@ -7,8 +7,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\LazyCollection;
 use Laravel\Scout\Builder;
 use Laravel\Scout\Engines\Engine;
-use RecursiveArrayIterator;
-use RecursiveIteratorIterator;
 use Sti3bas\ScoutArray\ArrayStore;
 
 class ArrayEngine extends Engine
@@ -106,12 +104,18 @@ class ArrayEngine extends Engine
         $index = $builder->index ?: $builder->model->searchableAs();
 
         $matches = $this->store->find($index, function ($record) use ($builder) {
-            $values = new RecursiveIteratorIterator(new RecursiveArrayIterator($record));
-
-            return $this->matchesFilters($record, $builder->wheres) &&
-                $this->matchesFilters($record, $builder->whereIns) &&
-                $this->matchesFilters($record, data_get($builder, 'whereNotIns', []), true) &&
-                ! empty(array_filter(iterator_to_array($values, false), function ($value) use ($builder) {
+            $values = [];
+            array_walk_recursive($record, function ($value) use (&$values) {
+                if ($value instanceof \BackedEnum) {
+                    $values[] = $value->value;
+                } elseif (is_scalar($value) || (is_object($value) && method_exists($value, '__toString'))) {
+                    $values[] = (string) $value;
+                }
+            });
+            return $this->matchesFilters($record, $builder->wheres)
+                && $this->matchesFilters($record, $builder->whereIns)
+                && $this->matchesFilters($record, data_get($builder, 'whereNotIns', []), true)
+                && ! empty(array_filter($values, function ($value) use ($builder) {
                     return ! $builder->query || stripos($value, $builder->query) !== false;
                 }));
         }, true);
@@ -302,7 +306,8 @@ class ArrayEngine extends Engine
         );
 
         return $this->constrainForSoftDeletes(
-            $builder, $this->addAdditionalConstraints($builder, $query->take($builder->limit))
+            $builder,
+            $this->addAdditionalConstraints($builder, $query->take($builder->limit))
         );
     }
 }
