@@ -2,6 +2,7 @@
 
 namespace Sti3bas\ScoutArray\Tests\Engines;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\LazyCollection;
@@ -13,6 +14,7 @@ use Sti3bas\ScoutArray\ArrayStore;
 use Sti3bas\ScoutArray\Engines\ArrayEngine;
 use Sti3bas\ScoutArray\Tests\Fixtures\EmptySearchableModel;
 use Sti3bas\ScoutArray\Tests\Fixtures\SearchableModel;
+use Sti3bas\ScoutArray\Tests\Fixtures\SearchableStatusEnum;
 use Sti3bas\ScoutArray\Tests\Fixtures\SoftDeletableSearchableModel;
 
 class ArrayEngineTest extends TestCase
@@ -59,6 +61,42 @@ class ArrayEngineTest extends TestCase
         $this->assertEquals(['id' => 4, 'foo' => ['test' => 'barbaz'], 'test' => 'foo', 'objectID' => 4, 'scoutKey' => '4'], $results['hits'][0]);
         $this->assertEquals(['id' => 3, 'foo' => 'bar', 'objectID' => '3', 'scoutKey' => '3'], $results['hits'][1]);
         $this->assertEquals(['id' => 1, 'foo' => 'bar', 'objectID' => '1', 'scoutKey' => '1'], $results['hits'][2]);
+    }
+
+    public function test_it_can_search_records_containing_objects_and_enums()
+    {
+        $store = new ArrayStore;
+        $engine = new ArrayEngine($store);
+        $index = (new SearchableModel)->searchableAs();
+
+        // Mimics a model whose toSearchableArray() returns objects and enums.
+        $store->set($index, '1', [
+            'objectID' => '1',
+            'scoutKey' => '1',
+            'created_at' => Carbon::parse('2024-11-19 11:10:32'),
+            'status' => SearchableStatusEnum::Active,
+        ]);
+        $store->set($index, '2', [
+            'objectID' => '2',
+            'scoutKey' => '2',
+            'created_at' => Carbon::parse('2024-11-20 11:10:32'),
+            'status' => SearchableStatusEnum::Archived,
+        ]);
+
+        // Carbon instances are traversable, so flattening the record with
+        // RecursiveArrayIterator throws "Overloaded object of type
+        // Illuminate\Support\Carbon is not compatible with RecursiveArrayIterator"
+        // on PHP >= 8.3.13.
+        $results = $engine->search(new Builder(new SearchableModel, '2024-11-19'));
+
+        $this->assertCount(1, $results['hits']);
+        $this->assertEquals('1', $results['hits'][0]['scoutKey']);
+
+        // Backed enums are matched on their value, not their case name.
+        $results = $engine->search(new Builder(new SearchableModel, 'archived'));
+
+        $this->assertCount(1, $results['hits']);
+        $this->assertEquals('2', $results['hits'][0]['scoutKey']);
     }
 
     public function test_it_returns_all_results_if_no_query_provided()

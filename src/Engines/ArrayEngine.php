@@ -2,14 +2,13 @@
 
 namespace Sti3bas\ScoutArray\Engines;
 
+use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\LazyCollection;
 use Laravel\Scout\Builder;
 use Laravel\Scout\Engines\Engine;
-use RecursiveArrayIterator;
-use RecursiveIteratorIterator;
 use Sti3bas\ScoutArray\ArrayStore;
 
 class ArrayEngine extends Engine
@@ -107,12 +106,20 @@ class ArrayEngine extends Engine
         $index = $builder->index ?: $builder->model->searchableAs();
 
         $matches = $this->store->find($index, function ($record) use ($builder) {
-            $values = new RecursiveIteratorIterator(new RecursiveArrayIterator($record));
+            $values = [];
+
+            array_walk_recursive($record, function ($value) use (&$values) {
+                if ($value instanceof BackedEnum) {
+                    $values[] = (string) $value->value;
+                } elseif (is_scalar($value) || (is_object($value) && method_exists($value, '__toString'))) {
+                    $values[] = (string) $value;
+                }
+            });
 
             return $this->matchesWheres($record, $builder->wheres)
                 && $this->matchesKeyValueFilters($record, $builder->whereIns)
                 && $this->matchesKeyValueFilters($record, $builder->whereNotIns, true)
-                && ! empty(array_filter(iterator_to_array($values, false), fn ($value) => ! $builder->query || stripos($value, $builder->query) !== false));
+                && ! empty(array_filter($values, fn ($value) => ! $builder->query || stripos($value, $builder->query) !== false));
         }, true);
 
         $matches = Collection::make($matches);
